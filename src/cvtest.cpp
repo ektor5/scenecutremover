@@ -2,7 +2,7 @@
 #include <iostream>
 
 #define BUFSIZE 200
-#define THRESHOLD 29
+#define THRESHOLD 1.5
 #define SC_N_DIFFS 5
 using namespace std;
 using namespace cv;
@@ -25,11 +25,9 @@ double get_frame_score (Mat* f1, Mat* f2) {
   width = f1->rows;
   height = f1->cols;
 
-  for ( int i=0 ; i<width; i++){ 
-	  for ( int j=0 ; j<width ; j++){
-		 score += abs(f1->data[i*width+j] - f2->data[i*width+j]);
-	  }
-  }
+  Mat(*f1 - *f2).forEach<int>([&score](int &p, const int * position) -> void {
+    score += abs(p);
+  });
 
   return ((double) score) / (width * height);
 }
@@ -114,13 +112,11 @@ void remove_freeze(Framebuf *buf, int start, int end){
 	/*freeze*/
 	cout << "freeze" << "\n";
 	for (int i=start; i != end ; i++){
-		if (i<center+start){
-			//cout << i-start << " "  << std::fixed << std::setprecision(3) << perc << "\n";
-			(*buf)[i%BUFSIZE] = (*buf)[a];
-		}else{
-			//cout << end-i << " "  << std::fixed << std::setprecision(3) << perc << "\n";
-			(*buf)[i%BUFSIZE] = (*buf)[b];
-		}
+		double perca = 1-(i-start)/(static_cast<double>(size));
+		double percb = 1-perca;
+		//cout << i-start << " "  << std::fixed << std::setprecision(3) << perc << "\n";
+		(*buf)[i%BUFSIZE] = (*buf)[a]*perca+(*buf)[b]*percb;
+		//cout << end-i << " "  << std::fixed << std::setprecision(3) << perc << "\n";
 	}
 }
 
@@ -134,11 +130,12 @@ void remove_stretch(Framebuf *buf, int start, int end){
 	for (int i=start-center; i != end+center; i++){
 		if (i-newstart < size){
 			int bufa = (newstart+(i-newstart)/2);
-			//cout << bufa << "\t a-> \t"<< i  << "\n";
+			cout << bufa << "\t a-> \t"<< i  << "\n";
 			tmp[i-newstart] = (*buf)[bufa%BUFSIZE];
 		}else{
-			int bufb = (start+center+(i-newstart)/2);
-			//cout << bufb << "\t b-> \t"<< i  << "\n";
+			double percb = (i-newstart-size)/(static_cast<double>(size));
+			int bufb = (end+(i-newstart-size)/2);
+			cout << bufb << "\t b-> \t"<< i  << "\n";
 			tmp[i-newstart] = (*buf)[bufb%BUFSIZE];
 		}
 	} 
@@ -151,92 +148,27 @@ void remove_stretch(Framebuf *buf, int start, int end){
 void remove_crossfade(Framebuf *buf, int start, int end ){
 	int size = end - start;
 	int center = size/2;
-	int newstart = start - center;
-	int newend = end + center;
-	Mat tmp[2*size];
+	int newstart = start - size;
+	int newend = end + size;
+	Mat tmp[3*size];
 	cout << "crossfade" << "\n";
 	for (int i=newstart; i != newend; i++){
-		double perca = 1-(i-newstart)/(static_cast<double>(size*2));
+		double perca = 1-(i-newstart)/(static_cast<double>(size*3));
 		double percb = 1-perca;
 		int bufi = i%BUFSIZE;
-		int bufa = (newstart+(i-newstart)/4)%BUFSIZE;
-		int bufb = (end+(i-newstart)/4)%BUFSIZE;
+		int bufa = (newstart+(i-newstart)/3)%BUFSIZE;
+		int bufb = (end+(i-newstart)/3)%BUFSIZE;
 		cout << bufa << "\t a-> \t" << i<< " "  << std::fixed << std::setprecision(3) << perca << "\n";
 		cout << bufb << "\t b-> \t" << i<< " "  << std::fixed << std::setprecision(3) << percb << "\n";
 		tmp[i-newstart] = (*buf)[bufa]*perca + (*buf)[bufb]*percb ;
 	}
+	cout << "copying tmp" << "\n";
 	for (int i=newstart; i != newend; i++){
 		int bufi = i%BUFSIZE;
 		(*buf)[bufi] = tmp[i-newstart];
 	}
 }
 
-void remove_scene(Framebuf *buf, int start, int end, int* last){
-	int size = end - start;
-	int center = size/2;
-	int a = start % BUFSIZE;
-	int b = end % BUFSIZE;
-
-	if (size < 10){
-		/*freeze*/
-		cout << "freeze" << "\n";
-		for (int i=start; i != end ; i++){
-			if (i<center+start){
-				//cout << i-start << " "  << std::fixed << std::setprecision(3) << perc << "\n";
-				(*buf)[i%BUFSIZE] = (*buf)[a];
-			}else{
-				//cout << end-i << " "  << std::fixed << std::setprecision(3) << perc << "\n";
-				(*buf)[i%BUFSIZE] = (*buf)[b];
-			}
-		}
-	} else { 
-		/* stretch transition.*/
-		/*
-	for (int i=start-center; i != end+center ; i++){
-		int bufi = i%BUFSIZE;
-		int newstart = start - center;
-		int newend = end + center;
-		if (i<start+center){
-			int bufa = (newstart+(i-newstart)/2);
-			//cout << bufa << "\t a-> \t"<< i  << "\n";
-			(*buf)[bufi] = (*buf)[bufa%BUFSIZE];
-		}else{
-			int bufb = (end+(i-newstart)/2);
-			//cout << bufb << "\t b-> \t"<< i << "\n";
-			(*buf)[bufi] = (*buf)[bufb%BUFSIZE];
-		}
-	} 
-	*/
-		cout << "stretch" << "\n";
-
-		Mat tmp[2*size];
-		int newstart = start - size;
-		for (int i=start-size; i != end; i++){
-			int bufa = (newstart+(i-newstart)/2);
-			//cout << bufa << "\t a-> \t"<< i  << "\n";
-			tmp[i-newstart] = (*buf)[bufa%BUFSIZE];
-
-		} 
-		for (int i=start-size; i != end; i++){
-			int bufi = i%BUFSIZE;
-			(*buf)[bufi] = tmp[i-newstart];
-		}
-		*last=1;
-	}
-		
-	if(0)
-	for (int i=start; i != end ; i++){
-			double perca = (1-(i-start)/(static_cast<double>(size)))/2;
-			double percb = (1-perca)/2;
-			int bufi = i%BUFSIZE;
-			int bufa = (start+(i-start)/2)%BUFSIZE;
-			int bufb = (start+(i-start)/2+center)%BUFSIZE;
-			//cout << bufa << "\t a \t"  << std::fixed << std::setprecision(3) << perca << "\n";
-			//cout << bufb << "\t b \t"  << std::fixed << std::setprecision(3) << percb << "\n";
-			(*buf)[bufi] = (*buf)[bufa]*perca + (*buf)[bufb]*percb ;
-	}
-
-}
 enum transitions : int {
 	FADEBLACK,
 	FREEZE,
@@ -341,24 +273,24 @@ int main(int argc, char* argv[]){
 							auto b = cuts.back();
 							auto bf = cuts[cuts.size()-2];
 							auto diff = b - bf;
+							double sec = diff / fps;
 							cout << nframes/fps << "\t" << bf << " " << b << " " << diff << "\n";
-							if (diff < THRESHOLD ){
+							if (sec < THRESHOLD ){
 								cout << "Short scene detected!" << "\n";
-								double sec = diff / fps;
 
 									if (sec > 0.8){
 										remove_fadeblack(&buf,bf,b);
 										lasttrans = FADEBLACK;
-									} else if (sec > 0.2){
+									} else if (sec > 0.5){
 										if (lasttrans == STRETCH)
 										{
 											LastTransition t = { 
 												.trans = CROSSFADE,
 												.b = b, 
 												.bf = bf, 
-												.trigger = nframes + diff/2 +1
+												.trigger = nframes + diff
 											};
-											delayed.push_back(t);
+											delayed.emplace_back(move(t));
 											lasttrans = CROSSFADE;
 											cout << "delayed crossfade" << "\n";
 										}else{
@@ -366,9 +298,9 @@ int main(int argc, char* argv[]){
 												.trans = STRETCH,
 												.b = b, 
 												.bf = bf, 
-												.trigger = nframes + diff/2 +1
+												.trigger = nframes + diff/2
 											};
-											delayed.push_back(t);
+											delayed.emplace_back(move(t));
 											lasttrans = STRETCH;
 											cout << "delayed stretch" << "\n";
 										}
@@ -435,8 +367,10 @@ int main(int argc, char* argv[]){
 			}
 		}
 		cout << "cuts" << "\n";
-		for ( auto &&i : cuts ) {
-			cout << i<< "\t" << i/fps << "\n";
+		int lastcut = 0;
+		for ( auto &i : cuts ) {
+			cout << i<< "\t" << i/fps << "\t"<< (i-lastcut)/fps << "\n";
+			lastcut = i;
 		}
 
 	// When everything done, release the video capture object
